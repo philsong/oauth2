@@ -117,11 +117,13 @@ func (c *Config) AuthCodeURL(state string, opts ...AuthCodeOption) string {
 	buf.WriteString(c.Endpoint.AuthURL)
 	v := url.Values{
 		"response_type": {"code"},
+		"appid":         {c.ClientID},
 		"client_id":     {c.ClientID},
 		"redirect_uri":  condVal(c.RedirectURL),
 		"scope":         condVal(strings.Join(c.Scopes, " ")),
 		"state":         condVal(state),
 	}
+
 	for _, opt := range opts {
 		opt.setValue(v)
 	}
@@ -274,9 +276,12 @@ func retrieveToken(ctx Context, c *Config, v url.Values) (*Token, error) {
 		return nil, err
 	}
 	v.Set("client_id", c.ClientID)
+	v.Set("appid", c.ClientID)
+
 	bustedAuth := !providerAuthHeaderWorks(c.Endpoint.TokenURL)
 	if bustedAuth && c.ClientSecret != "" {
 		v.Set("client_secret", c.ClientSecret)
+		v.Set("secret", c.ClientSecret)
 	}
 	req, err := http.NewRequest("POST", c.Endpoint.TokenURL, strings.NewReader(v.Encode()))
 	if err != nil {
@@ -301,18 +306,25 @@ func retrieveToken(ctx Context, c *Config, v url.Values) (*Token, error) {
 
 	var token *Token
 	content, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	fmt.Println("retrieveToken", content, "body:", string(body))
 	switch content {
-	case "application/x-www-form-urlencoded", "text/plain":
+	case "application/x-www-form-urlencoded", "text/html": //, "text/plain"
 		vals, err := url.ParseQuery(string(body))
 		if err != nil {
 			return nil, err
 		}
+		fmt.Println("retrieveToken.token1.01", vals.Get("access_token"), vals.Get("token_type"), vals.Get("refresh_token"))
+		fmt.Println("retrieveToken.token1.01.vals", vals)
+
 		token = &Token{
 			AccessToken:  vals.Get("access_token"),
 			TokenType:    vals.Get("token_type"),
 			RefreshToken: vals.Get("refresh_token"),
 			raw:          vals,
 		}
+
+		fmt.Println("retrieveToken.token1.0", token.AccessToken, token.TokenType, token.RefreshToken, token.raw)
+
 		e := vals.Get("expires_in")
 		if e == "" {
 			// TODO(jbd): Facebook's OAuth2 implementation is broken and
@@ -324,11 +336,14 @@ func retrieveToken(ctx Context, c *Config, v url.Values) (*Token, error) {
 		if expires != 0 {
 			token.Expiry = time.Now().Add(time.Duration(expires) * time.Second)
 		}
+
+		fmt.Println("retrieveToken.token1", token, "expires", expires, token.Expiry)
 	default:
 		var tj tokenJSON
 		if err = json.Unmarshal(body, &tj); err != nil {
 			return nil, err
 		}
+		fmt.Println("retrieveToken.tj", tj)
 		token = &Token{
 			AccessToken:  tj.AccessToken,
 			TokenType:    tj.TokenType,
@@ -337,6 +352,7 @@ func retrieveToken(ctx Context, c *Config, v url.Values) (*Token, error) {
 			raw:          make(map[string]interface{}),
 		}
 		json.Unmarshal(body, &token.raw) // no error checks for optional fields
+		fmt.Println("retrieveToken.token2", token)
 	}
 	// Don't overwrite `RefreshToken` with an empty value
 	// if this was a token refreshing request.
@@ -388,7 +404,9 @@ func providerAuthHeaderWorks(tokenURL string) bool {
 		strings.HasPrefix(tokenURL, "https://www.douban.com/") ||
 		strings.HasPrefix(tokenURL, "https://api.dropbox.com/") ||
 		strings.HasPrefix(tokenURL, "https://api.soundcloud.com/") ||
-		strings.HasPrefix(tokenURL, "https://www.linkedin.com/") {
+		strings.HasPrefix(tokenURL, "https://www.linkedin.com/") ||
+		strings.HasPrefix(tokenURL, "https://api.weixin.qq.com/") ||
+		strings.HasPrefix(tokenURL, "https://graph.qq.com/") {
 		// Some sites fail to implement the OAuth2 spec fully.
 		return false
 	}
