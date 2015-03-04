@@ -9,7 +9,7 @@ import (
 	"log"
 	"testing"
 
-	"golang.org/x/oauth2"
+	"github.com/philsong/oauth2"
 )
 
 // TODO(jbd): Remove after Go 1.4.
